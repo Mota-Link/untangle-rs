@@ -62,11 +62,13 @@ pub fn draw_points(points: &Points, flag: DrawPointsFlag) {
     for (i, point) in points.into_iter().enumerate() {
         let bigger = match flag {
             Hover(idx) if idx == i => true,
+            Hoding(_, ref adjacent) if adjacent.contains(&i) => true,
             AllBig | AllBigLight => true,
             _ => false,
         };
         let colors = match flag {
-            Hover(idx) | Hoding(idx) if idx == i => 0x31,
+            Hover(idx) | Hoding(idx, _) if idx == i => 0x31,
+            Hoding(_, ref adjacent) if adjacent.contains(&i) => 0x32,
             AllLight | AllBigLight => 0x31,
             _ => 0x42,
         };
@@ -77,7 +79,7 @@ pub fn draw_points(points: &Points, flag: DrawPointsFlag) {
 
 pub enum DrawPointsFlag {
     Normal,
-    Hoding(usize),
+    Hoding(usize, Vec<usize>),
     Hover(usize),
     AllLight,
     AllBig,

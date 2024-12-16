@@ -5,8 +5,8 @@ use crate::{
     resource::*,
     unwrap,
     wasm4::{
-        blit, line, rect, text, BLIT_1BPP, BLIT_2BPP, BLIT_FLIP_X, BLIT_FLIP_Y, BLIT_ROTATE,
-        DRAW_COLORS, MOUSE_X, MOUSE_Y, SCREEN_SIZE,
+        blit, diskr, diskw, hline, line, rect, text, BLIT_1BPP, BLIT_2BPP, BLIT_FLIP_X,
+        BLIT_FLIP_Y, BLIT_ROTATE, DRAW_COLORS, MOUSE_X, MOUSE_Y, SCREEN_SIZE,
     },
     ArrowState::{self, *},
     FinishState::{self, *},
@@ -52,7 +52,22 @@ pub unsafe fn update_playing(mouse_state: MouseButtonState) {
     }
 
     let draw_points_flag = match GAME.holding_point {
-        Some(i) => Hoding(i),
+        Some(i) => {
+            let adjacent = GAME
+                .lines
+                .iter()
+                .filter_map(|(a, b)| {
+                    if *a == i {
+                        Some(*b)
+                    } else if *b == i {
+                        Some(*a)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            Hoding(i, adjacent)
+        }
         None => {
             let mut flag = Normal;
             for (i, point) in GAME.points.iter().enumerate() {
@@ -72,6 +87,7 @@ pub unsafe fn update_playing(mouse_state: MouseButtonState) {
 pub unsafe fn update_title(mouse_state: MouseButtonState, title_state: &TitleState) {
     match title_state {
         Screen(speed) => update_title_screen(mouse_state, speed),
+        Level(speed) => update_level_select(mouse_state, speed),
         Start => update_title_start(),
     }
 }
@@ -103,38 +119,56 @@ unsafe fn update_title_screen(mouse_state: MouseButtonState, speed: &PointsSpeed
         GAME.lines = title_lines();
         GAME.state = Title(Screen(title_points_speed()));
     }
-    draw_lines(&GAME.lines);
-    draw_points(&GAME.points, AllLight);
+    let speed = title_animation(speed);
+    title();
 
-    let speed = speed
-        .iter()
-        .enumerate()
-        .map(|(i, (move_x, move_y))| {
-            let Point { x, y } = unwrap(GAME.points.get_mut(i));
-            *x = (*x + *move_x as i32).max(1).min(158);
-            let new_move_x = match x {
-                1 | 158 => move_x * -1,
-                _ => *move_x,
-            };
-            *y = (*y + *move_y as i32).max(1).min(158);
-            let new_move_y = match y {
-                1 | 158 => move_y * -1,
-                _ => *move_y,
-            };
-            (new_move_x, new_move_y)
-        })
-        .collect::<Vec<_>>();
+    if matches!(mouse_state, Released) {
+        GAME.state = Title(Level(speed));
+        return;
+    };
 
     if speed.len() != 0 {
         GAME.state = Title(Screen(speed));
     }
+}
+
+unsafe fn update_level_select(mouse_state: MouseButtonState, speed: &PointsSpeed) {
+    if GAME.points.len() == 0 {
+        GAME.points = title_points();
+        GAME.lines = title_lines();
+        GAME.state = Title(Level(title_points_speed()));
+    }
+    let speed = title_animation(speed);
+    if speed.len() != 0 {
+        GAME.state = Title(Level(speed));
+    }
+
+    if GAME.unlock_level.is_none() {
+        let mut buffer = [0u8; 1];
+        diskr(buffer.as_mut_ptr(), 1);
+        GAME.unlock_level = Some(u8::from_le_bytes(buffer).min(LEVEL_POINTS.len() as u8 - 1));
+    }
+    let unlock = unwrap(GAME.unlock_level);
+
+    *DRAW_COLORS = 0x33;
+    rect(0, 20, 160, 28);
+    *DRAW_COLORS = 0x1;
+    text("Select Level", 32, 30);
+
+    button(7, 65, Some(0), &mouse_state);
+    button(45, 65, (1 <= unlock).then_some(1), &mouse_state);
+    button(83, 65, (2 <= unlock).then_some(2), &mouse_state);
+    button(121, 65, (3 <= unlock).then_some(3), &mouse_state);
+    button(26, 87, (4 <= unlock).then_some(4), &mouse_state);
+    button(64, 87, (5 <= unlock).then_some(5), &mouse_state);
+    button(102, 87, (6 <= unlock).then_some(6), &mouse_state);
+    button(45, 109, (7 <= unlock).then_some(7), &mouse_state);
+    button(83, 109, (8 <= unlock).then_some(8), &mouse_state);
+    button(64, 131, (9 <= unlock).then_some(9), &mouse_state);
 
     if matches!(mouse_state, Released) {
-        GAME.state = Title(Start);
-        GAME.metronome = 90;
-    };
-
-    title();
+        GAME.holding_point = None;
+    }
 }
 
 unsafe fn update_title_start() {
@@ -148,6 +182,10 @@ unsafe fn update_title_start() {
 }
 
 unsafe fn update_finish_twinkle(time: &str) {
+    if GAME.current_level > unwrap(GAME.unlock_level) {
+        diskw(GAME.current_level.to_le_bytes().as_ptr(), 1);
+        GAME.unlock_level = Some(GAME.current_level);
+    }
     match GAME.metronome {
         ..5 | 15..20 => draw_points(&GAME.points, AllBigLight),
         5..10 | 20..25 => draw_points(&GAME.points, AllBig),
@@ -204,8 +242,7 @@ unsafe fn update_finish_arrow(mouse_state: MouseButtonState, arrow_state: &Arrow
 
 unsafe fn update_next_level() {
     let y = GAME.metronome as i32 - GRADIENT_H * 2 - CURTAIN_H;
-    let level = unwrap((GAME.difficulty - 6).checked_div(3));
-    if level == 7 {
+    if GAME.current_level == 10 {
         curtain(&["The End."], y, false);
         if y >= -130 {
             GAME.state = End;
@@ -222,12 +259,12 @@ unsafe fn update_next_level() {
             draw_points(&GAME.points, Normal);
             GAME.state = Playing;
             GAME.metronome = 0;
-            GAME.difficulty += 3;
+            GAME.current_level += 1;
         }
         _ => (),
     }
-    let level = "LEVEL ".to_string() + &level.to_string();
-    let points = GAME.difficulty.to_string() + " Points";
+    let level = "LEVEL ".to_string() + &GAME.current_level.to_string();
+    let points = level_points_num().to_string() + " Points";
     curtain(&[&level, &points], y, false);
     GAME.metronome += 3;
 }
@@ -245,6 +282,78 @@ unsafe fn title() {
         *DRAW_COLORS = 0x3;
         text("Tap to Start", 32, 120);
     }
+}
+
+unsafe fn title_animation(speed: &PointsSpeed) -> PointsSpeed {
+    draw_lines(&GAME.lines);
+    draw_points(&GAME.points, AllLight);
+    speed
+        .iter()
+        .enumerate()
+        .map(|(i, (move_x, move_y))| {
+            let Point { x, y } = unwrap(GAME.points.get_mut(i));
+            *x = (*x + *move_x as i32).max(1).min(158);
+            let new_move_x = match x {
+                1 | 158 => move_x * -1,
+                _ => *move_x,
+            };
+            *y = (*y + *move_y as i32).max(1).min(158);
+            let new_move_y = match y {
+                1 | 158 => move_y * -1,
+                _ => *move_y,
+            };
+            (new_move_x, new_move_y)
+        })
+        .collect::<Vec<_>>()
+}
+
+pub unsafe fn level_points_num() -> u8 {
+    let level = (GAME.current_level as usize).min(LEVEL_POINTS.len() - 1);
+    *unwrap(LEVEL_POINTS.get(level))
+}
+
+unsafe fn button(x: i32, y: i32, level: Option<usize>, mouse_state: &MouseButtonState) {
+    let contains_x = *MOUSE_X as i32 >= x && (*MOUSE_X as i32) < x + BUTTON_W;
+    let contains_y = *MOUSE_Y as i32 >= y && (*MOUSE_Y as i32) < y + BUTTON_H;
+    let (stroke, fill, txt) = match (level, mouse_state) {
+        (None, _) => (0x3, 0x3, 0x4),
+        (_, Pressed) if contains_x && contains_y => {
+            GAME.holding_point = level;
+            (0x3, 0x3, 0x1)
+        }
+        (_, Released) if GAME.holding_point == level && contains_x && contains_y => {
+            GAME.current_level = unwrap(level) as u8;
+            GAME.state = Title(Start);
+            GAME.metronome = 90;
+            (0x3, 0x3, 0x1)
+        }
+        (_, Held) if GAME.holding_point == level => (0x3, 0x3, 0x1),
+        (_, Idle) if contains_x && contains_y => (0x3, 0x2, 0x3),
+        _ => (0x3, 0x1, 0x3),
+    };
+
+    *DRAW_COLORS = 0x1;
+    rect(x - 1, y - 1, BUTTON_W as u32 + 2, BUTTON_H as u32 + 2);
+    *DRAW_COLORS = stroke << 4 | fill;
+    rect(x, y, BUTTON_W as u32, BUTTON_H as u32);
+    *DRAW_COLORS = 0x1;
+    rect(x, y, 2, 2);
+    rect(x - 2 + BUTTON_W, y, 2, 2);
+    rect(x, y - 2 + BUTTON_H, 2, 2);
+    rect(x - 2 + BUTTON_W, y - 2 + BUTTON_H, 2, 2);
+    *DRAW_COLORS = stroke;
+    hline(x + 1, y + 1, 1);
+    hline(x - 2 + BUTTON_W, y + 1, 1);
+    hline(x + 1, y - 2 + BUTTON_H, 1);
+    hline(x - 2 + BUTTON_W, y - 2 + BUTTON_H, 1);
+
+    let cx = x + unwrap((BUTTON_W - 8).checked_div(2));
+    let cy = y + unwrap((BUTTON_H - 8).checked_div(2));
+    *DRAW_COLORS = txt;
+    match level {
+        Some(l) => text(l.to_string(), cx, cy),
+        None => blit(&LOCK, cx, cy, LOCK_W, LOCK_H, 0),
+    };
 }
 
 pub unsafe fn gradient(colors: u16, y: i32) {

@@ -1,3 +1,7 @@
+pub const LEVEL_POINTS: [u8; 10] = [6, 8, 12, 16, 21, 27, 36, 50, 70, 99];
+pub const BUTTON_W: i32 = 32;
+pub const BUTTON_H: i32 = 16;
+
 pub const CURTAIN_H: i32 = 350;
 
 pub const GRADIENT: [u8; 4] = [0b11101010, 0b01010000, 0b11101000, 0b11010000];
@@ -58,3 +62,9 @@ pub const U: [u8; 3] = [0b11110010, 0b00100010, 0b00100001];
 pub const E: [u8; 3] = [0b11111000, 0b00110001, 0b00110000];
 pub const CHAR_W: u32 = 4;
 pub const CHAR_H: u32 = 6;
+
+pub const LOCK: [u8; 8] = [
+    0b11000011, 0b10011001, 0b10011001, 0b00000000, 0b00000000, 0b00010000, 0b00010000, 0b00000000,
+];
+pub const LOCK_W: u32 = 8;
+pub const LOCK_H: u32 = 8;

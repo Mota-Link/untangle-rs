@@ -8,7 +8,7 @@ mod wasm4;
 
 use line::{check_intersect, init_lines, Line, Lines};
 use point::{init_points, Point, Points, PointsSpeed};
-use scene::{update_finish, update_playing, update_title, update_end};
+use scene::{level_points_num, update_end, update_finish, update_playing, update_title};
 use wasm4::{MOUSE_BUTTONS, MOUSE_LEFT};
 
 use GameState::*;
@@ -36,7 +36,8 @@ static mut GAME: Game = Game {
     intersect_lines: None,
     state: Title(Screen(PointsSpeed::new())),
     seed: 0,
-    difficulty: 6,
+    current_level: 10, // MAX 170
+    unlock_level: None,
     metronome: 0,
 };
 
@@ -48,7 +49,8 @@ struct Game {
     intersect_lines: Option<(Line, Line)>,
     state: GameState,
     seed: u64,
-    difficulty: u8,
+    current_level: u8,
+    unlock_level: Option<u8>,
     metronome: u32,
 }
 
@@ -56,8 +58,9 @@ unsafe fn init_game() {
     GAME.holding_point = None;
     GAME.previous_mouse = 0;
     loop {
-        GAME.points = init_points(GAME.difficulty as usize, true);
-        GAME.lines = init_lines(GAME.difficulty as usize);
+        let num_points = level_points_num() as usize;
+        GAME.points = init_points(num_points, true);
+        GAME.lines = init_lines(num_points);
         GAME.intersect_lines = get_intersect_lines();
         if GAME.intersect_lines.is_some() {
             break;
@@ -112,6 +115,7 @@ enum GameState {
 
 enum TitleState {
     Screen(PointsSpeed),
+    Level(PointsSpeed),
     Start,
 }
 
